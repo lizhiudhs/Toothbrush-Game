@@ -1,0 +1,300 @@
+import React, { useState, useEffect, useCallback } from 'react';
+
+const modes = [
+  { name: 'Clean', frequency: 'high', amplitude: 'medium', power: 1 },
+  { name: 'Whiten', frequency: 'medium', amplitude: 'high', power: 2 },
+  { name: 'Gum Care', frequency: 'low', amplitude: 'low', power: 1 },
+  { name: ' Power', frequency: 'very-high', amplitude: 'very-high', power: 3 },
+];
+
+const dirtTypes = [
+  { name: 'Normal Stains', difficulty: 1, bestMode: 'Clean' },
+  { name: 'Colored Stains', difficulty: 2, bestMode: 'Whiten' },
+  { name: 'Gum Issues', difficulty: 1, bestMode: 'Gum Care' },
+  { name: 'Stubborn Stains', difficulty: 3, bestMode: 'Power' },
+];
+
+const ToothbrushGame = () => {
+  const [currentDirt, setCurrentDirt] = useState(null);
+  const [score, setScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [gameActive, setGameActive] = useState(false);
+  const [level, setLevel] = useState(1);
+  const [combo, setCombo] = useState(0);
+  const [powerMeter, setPowerMeter] = useState(0);
+  const [message, setMessage] = useState('');
+  const [energy, setEnergy] = useState(0);
+  const [clickTimes, setClickTimes] = useState([]);
+  const [difficulty, setDifficulty] = useState(1);
+  const [streakBonus, setStreakBonus] = useState(1);
+  const [dailyChallenge, setDailyChallenge] = useState(null);
+  const [achievements, setAchievements] = useState([]);
+  const [powerups, setPowerups] = useState([]);
+  const [highScore, setHighScore] = useState(0);
+
+  const generateNewDirt = useCallback(() => {
+    const levelAdjustedDirt = dirtTypes.filter(dirt => dirt.difficulty <= Math.ceil(difficulty));
+    const newDirt = levelAdjustedDirt[Math.floor(Math.random() * levelAdjustedDirt.length)];
+    setCurrentDirt(newDirt);
+  }, [difficulty]);
+
+  useEffect(() => {
+    if (gameActive && timeLeft > 0) {
+      const timer = setInterval(() => {
+        setTimeLeft(prevTime => prevTime - 1);
+        setDifficulty(prevDiff => Math.min(prevDiff + 0.1 / 10, 3));
+      }, 1000);
+      return () => clearInterval(timer);
+    } else if (timeLeft === 0) {
+      endGame();
+    }
+  }, [gameActive, timeLeft]);
+
+  useEffect(() => {
+    if (score > 0 && score % 100 === 0) {
+      setLevel(prevLevel => {
+        const newLevel = prevLevel + 1;
+        setMessage(prevMessage => `${prevMessage} Level up! Now at level ${newLevel}`);
+        unlockAchievement('LevelUp');
+        return newLevel;
+      });
+    }
+  }, [score]);
+
+  useEffect(() => {
+    // Load high score from local storage
+    const savedHighScore = localStorage.getItem('highScore');
+    if (savedHighScore) {
+      setHighScore(parseInt(savedHighScore, 10));
+    }
+
+    // Generate daily challenge
+    setDailyChallenge({
+      target: Math.floor(Math.random() * 1000) + 2400,
+      reward: 'Super Powerup'
+    });
+  }, []);
+
+  const startGame = () => {
+    setScore(0);
+    setTimeLeft(60);
+    setGameActive(true);
+    setLevel(1);
+    setCombo(0);
+    setPowerMeter(0);
+    setEnergy(0);
+    setClickTimes([]);
+    setDifficulty(1);
+    setStreakBonus(1);
+    setMessage('Game Start!');
+    generateNewDirt();
+  };
+
+  const handleModeClick = (mode) => {
+    if (!gameActive || !currentDirt) return;
+
+    const now = Date.now();
+    setClickTimes(prevTimes => [...prevTimes, now].slice(-5));
+
+    if (mode.name === currentDirt.bestMode) {
+      const baseScore = currentDirt.difficulty * 10;
+      const comboBonus = Math.floor(combo / 3);
+      const levelBonus = level - 1;
+      const totalScore = Math.floor((baseScore + comboBonus + levelBonus) * streakBonus);
+
+      setScore(prevScore => {
+        const newScore = prevScore + totalScore;
+        setMessage(`Perfect! Score +${totalScore}, Total ${newScore}`);
+        return newScore;
+      });
+      setCombo(prevCombo => prevCombo + 1);
+      setPowerMeter(prevPower => Math.min(prevPower + mode.power, 100));
+      setStreakBonus(prevBonus => Math.min(prevBonus + 0.1, 2));
+
+      if (clickTimes.length === 5 && (now - clickTimes[0]) <= 2000) {
+        setEnergy(prevEnergy => {
+          const newEnergy = Math.min(prevEnergy + 20, 100);
+          setMessage(prevMessage => `${prevMessage} Quick combo! Energy +20`);
+          return newEnergy;
+        });
+      }
+
+      if (Math.random() < 0.7 + (difficulty - 1) * 0.1) {
+        generateNewDirt();
+      }
+
+      // Random powerup drop
+      if (Math.random() < 0.1) {
+        const newPowerup = getRandomPowerup();
+        setPowerups(prevPowerups => [...prevPowerups, newPowerup]);
+        setMessage(prevMessage => `${prevMessage} Got powerup: ${newPowerup.name}!`);
+      }
+    } else {
+      setCombo(0);
+      setPowerMeter(prevPower => Math.max(prevPower - 10, 0));
+      setStreakBonus(1);
+      setMessage('Mismatch, try again');
+    }
+
+    if (energy >= 100) {
+      activateSpecialSkill();
+    }
+
+    checkAchievements();
+  };
+
+  const activatePowerMode = () => {
+    setTimeLeft(prevTime => prevTime + 10);
+    setPowerMeter(0);
+    setMessage('Super mode activated! Time +10 seconds');
+  };
+
+  const activateSpecialSkill = () => {
+    setEnergy(0);
+    setMessage('Magic Wand Strike! Stains cleared!');
+    generateNewDirt();
+  };
+
+  const endGame = () => {
+    setGameActive(false);
+    const finalMessage = `Game Over! Final score: ${score}`;
+    setMessage(prevMessage => `${prevMessage} ${finalMessage}`);
+    
+    if (score > highScore) {
+      setHighScore(score);
+      localStorage.setItem('highScore', score.toString());
+      unlockAchievement('NewHighScore');
+    }
+
+    if (score >= dailyChallenge.target) {
+      setMessage(prevMessage => `${prevMessage} Daily challenge completed! Reward: ${dailyChallenge.reward}`);
+      unlockAchievement('DailyChallenge');
+    }
+  };
+
+  const getRandomPowerup = () => {
+    const powerups = [
+      { name: 'Time Freeze', effect: () => setTimeLeft(prevTime => prevTime + 5) },
+      { name: 'Double Score', effect: () => setStreakBonus(prevBonus => prevBonus * 2) },
+    ];
+    return powerups[Math.floor(Math.random() * powerups.length)];
+  };
+
+  const unlockAchievement = (achievementId) => {
+    if (!achievements.includes(achievementId)) {
+      setAchievements(prevAchievements => [...prevAchievements, achievementId]);
+      setMessage(prevMessage => `${prevMessage} Achievement unlocked: ${achievementId}!`);
+    }
+  };
+
+  const checkAchievements = () => {
+    if (combo >= 10) unlockAchievement('ComboMaster');
+    if (score >= 1000) unlockAchievement('Score1000');
+    if (level >= 5) unlockAchievement('Level5');
+  };
+
+  return (
+    <div className="toothbrush-game p-4 max-w-md mx-auto bg-gray-100 rounded-lg shadow-lg">
+      <h1 className="text-2xl font-bold mb-4 text-center text-blue-600">Tech Mystery: Magic Wand and Smart Toothbrush</h1>
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="bg-white p-2 rounded shadow">
+          <div className="font-bold text-gray-700">Score</div>
+          <div className="text-2xl font-bold text-blue-600">{score}</div>
+        </div>
+        <div className="bg-white p-2 rounded shadow">
+          <div className="font-bold text-gray-700">Time</div>
+          <div className="text-2xl font-bold text-green-600">{timeLeft}s</div>
+        </div>
+        <div className="bg-white p-2 rounded shadow">
+          <div className="font-bold text-gray-700">Level</div>
+          <div className="text-2xl font-bold text-purple-600">{level}</div>
+        </div>
+        <div className="bg-white p-2 rounded shadow">
+          <div className="font-bold text-gray-700">Combo</div>
+          <div className="text-2xl font-bold text-orange-600">{combo}</div>
+        </div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Energy</div>
+        <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+          <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out" style={{ width: `${energy}%` }}></div>
+        </div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Current Stain</div>
+        <div className="text-lg font-semibold text-red-600">{currentDirt?.name || 'None'}</div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Difficulty</div>
+        <div className="text-lg font-semibold text-purple-600">{difficulty.toFixed(1)}</div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Streak Bonus</div>
+        <div className="text-lg font-semibold text-yellow-600">x{streakBonus.toFixed(1)}</div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">High Score</div>
+        <div className="text-lg font-semibold text-pink-600">{highScore}</div>
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Daily Challenge</div>
+        <div className="text-lg font-semibold text-indigo-600">
+          Target: {dailyChallenge?.target} points | Reward: {dailyChallenge?.reward}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        {modes.map((mode) => (
+          <button 
+            key={mode.name} 
+            onClick={() => handleModeClick(mode)} 
+            disabled={!gameActive}
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200"
+          >
+            {mode.name}
+          </button>
+        ))}
+      </div>
+      <div className="mb-4">
+        <div className="font-bold text-gray-700 mb-1">Available Powerups</div>
+        <div className="flex flex-wrap gap-2">
+          {powerups.map((powerup, index) => (
+            <button
+              key={index}
+              onClick={() => {
+                powerup.effect();
+                setPowerups(prevPowerups => prevPowerups.filter((_, i) => i !== index));
+              }}
+              className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded text-sm"
+            >
+              {powerup.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button 
+        onClick={startGame} 
+        disabled={gameActive}
+        className="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 transition-colors duration-200 mb-4"
+      >
+        {gameActive ? 'Game in Progress' : 'Start Game'}
+      </button>
+      {message && (
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded" role="alert">
+          <p>{message}</p>
+        </div>
+      )}
+      <div className="mt-4">
+        <div className="font-bold text-gray-700 mb-1">Achievements</div>
+        <div className="flex flex-wrap gap-2">
+          {achievements.map((achievement, index) => (
+            <div key={index} className="bg-purple-200 text-purple-800 py-1 px-2 rounded text-sm">
+              {achievement}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ToothbrushGame;
